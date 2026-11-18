@@ -1,0 +1,141 @@
+openapi: 3.1.0
+info:
+  title: CrossVerification
+  version: "1.0"
+  description: >
+    Lets one Discord bot ask another whether it vouches for a user. Two endpoints, one
+    shared key per pairing, and an answer that is deliberately one bit wide. The prose
+    version with the reasoning behind each decision is in SPEC.md - read that one first;
+    this file exists so tooling can generate clients.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://issuer.example.com
+    description: Whatever address the issuer gave the relying party.
+
+paths:
+  /coop/check:
+    post:
+      summary: Does this user count as verified here?
+      description: >
+        A `false` means "not verified" and nothing else - not "unknown", not "no such
+        member". A 403 is the only status that says something about the pairing rather than
+        the person, and its body is identical to a plain no so the endpoint cannot be used
+        to tell valid keys from invalid ones.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [key, user_id]
+              properties:
+                key:
+                  type: string
+                  description: The pairing key, issued by this side.
+                user_id:
+                  type: string
+                  pattern: '^[0-9]{1,25}$'
+                  description: Discord user id.
+      responses:
+        "200":
+          description: Answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verified]
+                properties:
+                  verified: { type: boolean }
+              examples:
+                yes: { value: { verified: true } }
+                no: { value: { verified: false } }
+        "400":
+          description: key or user_id missing or malformed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Denied" }
+        "403":
+          description: Key unknown, revoked or disabled. Body identical to a plain no.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Denied" }
+        "429":
+          description: Too many requests for this key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Throttled" }
+
+  /coop/info:
+    post:
+      summary: Who are you, and which roles does this pairing share?
+      description: >
+        For setup only. Returns the NAMES of the shared roles and the server name - never
+        ids, never the other roles, nothing about members.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string }
+      responses:
+        "200":
+          description: Answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean, const: true }
+                  server: { type: string }
+                  roles:
+                    type: array
+                    items: { type: string }
+              example:
+                ok: true
+                server: Example Community
+                roles: [Verified 18+, Trusted]
+        "400":
+          description: key missing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotOk" }
+        "403":
+          description: Key unknown, revoked or disabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotOk" }
+        "429":
+          description: Too many requests for this key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ThrottledInfo" }
+
+components:
+  schemas:
+    Denied:
+      type: object
+      required: [verified]
+      properties:
+        verified: { type: boolean, const: false }
+    Throttled:
+      type: object
+      properties:
+        verified: { type: boolean, const: false }
+        error: { type: string, const: too many requests }
+    NotOk:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, const: false }
+    ThrottledInfo:
+      type: object
+      properties:
+        ok: { type: boolean, const: false }
+        error: { type: string, const: too many requests }
